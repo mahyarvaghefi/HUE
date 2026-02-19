@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hue-embedding"
+version = "1.0.0"
+description = "Homophily-based User Embedding for social network analysis"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Mahyar Sharif Vaghefi", email = "mahyar.sharifvaghefi@uta.edu"},
+    {name = "Derek L. Nazareth", email = "derek@uwm.edu"},
+]
+keywords = [
+    "social network analysis",
+    "node embedding",
+    "graph embedding",
+    "community detection",
+    "link prediction",
+    "homophily",
+    "user preferences",
+    "recommendation systems",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.20",
+    "pandas>=1.3",
+    "networkx>=2.6",
+    "scipy>=1.7",
+    "scikit-learn>=1.0",
+]
+
+[project.optional-dependencies]
+clustering = ["leidenalg>=0.9", "python-igraph>=0.10"]
+visualization = ["matplotlib>=3.4", "fa2>=0.3"]
+all = ["leidenalg>=0.9", "python-igraph>=0.10", "matplotlib>=3.4", "fa2>=0.3"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "black", "ruff"]
+
+[project.urls]
+Homepage = "https://mahyarsv.github.io/HUE/"
+Documentation = "https://mahyarsv.github.io/HUE/"
+Repository = "https://github.com/mahyarsv/HUE"
+"Bug Tracker" = "https://github.com/mahyarsv/HUE/issues"
+"Published Paper" = "https://doi.org/10.17705/1jais.00711"
+
+[tool.setuptools.packages.find]
+include = ["hue_embedding*"]
