@@ -71,34 +71,61 @@ pip install -e ".[all]"
 
 ### Option 1: From Two Separate Networks (Recommended for Real Data)
 
-When you have a social network dataset with a known bipartite structure (users following pages), provide the two networks directly:
+When you have a social network dataset with a known bipartite structure (users following pages), provide the two networks as CSV files:
 
 ```python
+import numpy as np
 import pandas as pd
 import networkx as nx
 from hue_embedding import HUE
 
-# Load your data
-bipartite_df = pd.read_csv('user_page_follows.csv')  # columns: user, page
-user_net_df  = pd.read_csv('user_friendships.csv')    # columns: user_a, user_b
+# Load CSV files
+# bipartite.csv:    columns [Source, Target] — Source=user, Target=page
+# user_network.csv: columns [Source, Target] — both are users
+bipartite_df = pd.read_csv('bipartite.csv')
+user_net_df  = pd.read_csv('user_network.csv')
 
-# Build graphs
+# Build bipartite graph (users → pages)
 bip_graph = nx.from_pandas_edgelist(
-    bipartite_df, 'user', 'page', create_using=nx.DiGraph())
-usr_graph = nx.from_pandas_edgelist(user_net_df, 'user_a', 'user_b')
+    bipartite_df, 'Source', 'Target', create_using=nx.DiGraph())
 
-# Extract adjacency matrices
-users = sorted(set(bipartite_df['user']))
-pages = sorted(set(bipartite_df['page']))
+# Build user-to-user graph (keep mutual follows only)
+usr_graph = nx.from_pandas_edgelist(
+    user_net_df, 'Source', 'Target', create_using=nx.DiGraph())
+to_remove = [(u, v) for u, v in usr_graph.edges()
+             if not usr_graph.has_edge(v, u)]
+usr_graph.remove_edges_from(to_remove)
+usr_graph = usr_graph.to_undirected()
+
+# Identify users and pages, extract adjacency matrices
+pages = sorted(set(bipartite_df['Target']))
+users = sorted(set(bipartite_df['Source']) - set(pages))
 bip_adj = nx.bipartite.biadjacency_matrix(bip_graph, users, pages)
 usr_adj = nx.adjacency_matrix(usr_graph, users)
 
-# Fit HUE
-model = HUE(random_state=42)
+# Fit HUE — all parameters are set on the constructor
+model = HUE(
+    n_clustering_iterations=50,   # runs of community detection
+    partition_method='surprise',   # or 'modularity'
+    n_jobs=2,                      # parallel workers for similarity
+    chunksize=3,                   # multiprocessing chunk size
+    normalize=True,                # rows sum to 1
+    random_state=42
+)
 embedding = model.fit_from_networks(
     bip_adj, usr_adj,
-    user_ids=users, core_ids=pages
+    user_ids=np.array(users), core_ids=np.array(pages)
 )
+
+# Output 1: Which cluster each page belongs to
+cluster_labels = model.get_cluster_labels()
+page_clusters = pd.DataFrame([
+    {'page': p, 'cluster': c} for p, c in cluster_labels.items()
+]).sort_values('cluster')
+page_clusters.to_csv('page_clusters.csv', index=False)
+
+# Output 2: User embedding vectors
+embedding.to_csv('user_embeddings.csv', index=True)
 ```
 
 ### Option 2: From a Single Graph (Synthetic Data, Exploration)
@@ -166,6 +193,7 @@ Each user is represented by a vector where each dimension corresponds to a disco
 | `n_jobs` | int | `2` | Parallel workers for similarity computation |
 | `chunksize` | int | `3` | Chunk size for multiprocessing |
 | `normalize` | bool | `True` | Normalize rows to sum to 1 (proportional membership) |
+| `verbose` | bool | `True` | Print progress messages during fitting |
 | `random_state` | int or None | `None` | Seed for reproducibility |
 
 **Methods:**

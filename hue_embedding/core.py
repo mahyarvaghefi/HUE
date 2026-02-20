@@ -86,6 +86,8 @@ class HUE:
         If True, normalize embedding rows so each row sums to 1
         (proportional community membership). If False, return raw
         weighted connectivity values.
+    verbose : bool, default=True
+        If True, print progress messages during fitting.
     random_state : int or None, default=None
         Seed for reproducibility in core selection and clustering.
 
@@ -136,6 +138,7 @@ class HUE:
         n_jobs=2,
         chunksize=3,
         normalize=True,
+        verbose=True,
         random_state=None,
     ):
         self.n_cores = n_cores
@@ -145,7 +148,13 @@ class HUE:
         self.n_jobs = n_jobs
         self.chunksize = chunksize
         self.normalize = normalize
+        self.verbose = verbose
         self.random_state = random_state
+
+    def _log(self, msg):
+        """Print progress message if verbose is enabled."""
+        if self.verbose:
+            print(msg)
 
     # ==================================================================
     # Public API — Option 1: Single graph
@@ -176,18 +185,26 @@ class HUE:
         rng = np.random.RandomState(self.random_state)
 
         # Step 1: Select core vertices
+        self._log("[Step 1/5] Selecting core vertices...")
         self.core_nodes_ = self._select_cores(G, core_nodes, rng)
+        self._log(f"  Selected {len(self.core_nodes_)} cores from {G.number_of_nodes()} nodes")
 
         # Step 2: Form extended bipartite graph
+        self._log("[Step 2/5] Building extended bipartite graph...")
         bipartite_adj, general_adj, self._user_nodes, self._core_order = (
             self._build_extended_bipartite(G)
         )
+        self._log(f"  Bipartite: {bipartite_adj.shape[0]} users x {bipartite_adj.shape[1]} cores")
+        self._log(f"  User network: {general_adj.shape[0]} x {general_adj.shape[1]}")
 
         # Steps 3–4: Similarity -> weighted graph -> clustering
         self._fit_similarity_and_cluster(bipartite_adj, general_adj, rng)
 
         # Step 5: Compute embedding features
+        self._log("[Step 5/5] Computing embeddings...")
         self.embedding_ = self._compute_embedding(G)
+        self._log(f"  Embedding shape: {self.embedding_.shape}")
+        self._log("Done.")
 
         return self
 
@@ -269,6 +286,7 @@ class HUE:
         """
         rng = np.random.RandomState(self.random_state)
 
+        self._log("[Step 1/5] Validating inputs...")
         if not issparse(bipartite_adj):
             bipartite_adj = csr_matrix(bipartite_adj)
         if not issparse(user_adj):
@@ -295,6 +313,7 @@ class HUE:
         self._core_order = core_ids.copy()
 
         # Filter empty rows/cols
+        self._log("[Step 2/5] Filtering empty rows/columns...")
         row_mask = np.array(bipartite_adj.sum(axis=1)).reshape(-1) > 0
         col_mask = np.array(bipartite_adj.sum(axis=0)).reshape(-1) > 0
         bip_filtered = bipartite_adj[row_mask][:, col_mask]
@@ -304,13 +323,23 @@ class HUE:
         self._core_order = core_ids[col_mask]
         self.core_nodes_ = self._core_order.copy()
 
+        self._log(f"  Bipartite: {bip_filtered.shape[0]} users x {bip_filtered.shape[1]} cores")
+        self._log(f"  User network: {usr_filtered.shape[0]} x {usr_filtered.shape[1]}")
+        removed_users = n_users - row_mask.sum()
+        removed_cores = n_cores - col_mask.sum()
+        if removed_users > 0 or removed_cores > 0:
+            self._log(f"  Removed {removed_users} empty users, {removed_cores} empty cores")
+
         # Steps 3–4: Similarity -> weighted graph -> clustering
         self._fit_similarity_and_cluster(bip_filtered, usr_filtered, rng)
 
         # Step 5: Compute embedding
+        self._log("[Step 5/5] Computing embeddings...")
         self.embedding_ = self._compute_embedding_from_networks(
             bipartite_adj, user_ids, core_ids
         )
+        self._log(f"  Embedding shape: {self.embedding_.shape}")
+        self._log("Done.")
 
         return self.embedding_
 
@@ -320,13 +349,24 @@ class HUE:
 
     def _fit_similarity_and_cluster(self, bipartite_adj, general_adj, rng):
         """Steps 3–4: compute similarity, build weighted graph, cluster."""
+        n_cores = bipartite_adj.shape[1]
+        self._log(f"[Step 3/5] Computing pairwise similarity for {n_cores} cores...")
         self.similarity_matrix_ = find_similarity_matrix(
             bipartite_adj, general_adj,
-            n_jobs=self.n_jobs, chunksize=self.chunksize
+            n_jobs=self.n_jobs, chunksize=self.chunksize,
+            verbose=self.verbose
         )
+        nnz = self.similarity_matrix_.nnz
+        self._log(f"  Similarity matrix: {n_cores}x{n_cores}, {nnz} nonzero entries")
+
+        self._log(f"[Step 4/5] Clustering cores ({self.partition_method}, "
+                   f"{self.n_clustering_iterations} iterations)...")
         self.clusters_, self.n_clusters_, self.core_weights_ = (
             self._cluster_cores(rng)
         )
+        self._log(f"  Found {self.n_clusters_} communities")
+        for label, members in self.clusters_.items():
+            self._log(f"    Cluster {label}: {len(members)} cores")
 
     def _validate_input(self, G, core_nodes):
         if not isinstance(G, nx.Graph):

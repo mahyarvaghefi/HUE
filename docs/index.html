@@ -592,59 +592,86 @@ print(labels)
 
         <h3 class="sub">Example 3 — Two Separate Networks (Real-World Workflow)</h3>
 
-        <p>In real social networks, the bipartite structure is already known: users follow social pages, and users are connected to each other. You can provide these <strong>two networks directly</strong> using <code>fit_from_networks</code>:</p>
+        <p>In real social networks, the bipartite structure is already known: users follow social pages, and users are connected to each other. Provide two CSV files and get two outputs — page cluster assignments and user embeddings:</p>
 
-        <div class="code-block"><pre style="margin:0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">import pandas as pd
+        <div class="code-block"><pre style="margin:0; font-family:inherit; font-size:inherit; line-height:inherit; color:inherit;">import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import pandas as pd
 import networkx as nx
 from hue_embedding import HUE
 
-<span class="comment"># 1. Load your data</span>
-<span class="comment"># bipartite_df: columns [user, page] — who follows which page</span>
-<span class="comment"># user_net_df:  columns [user_a, user_b] — mutual follows between users</span>
-bipartite_df = pd.read_csv('user_page_follows.csv')
-user_net_df  = pd.read_csv('user_friendships.csv')
+<span class="comment"># 1. Load CSV files</span>
+<span class="comment"># bipartite.csv:    columns [Source, Target] — Source=user, Target=page</span>
+<span class="comment"># user_network.csv: columns [Source, Target] — both are users</span>
+bipartite_df = pd.read_csv('bipartite.csv')
+user_net_df  = pd.read_csv('user_network.csv')
 
-<span class="comment"># 2. Build directed bipartite graph (users → pages)</span>
+<span class="comment"># 2. Build bipartite graph (users → pages)</span>
+<span class="comment"># ALL edges are kept — every follow relationship is used</span>
 bip_graph = nx.from_pandas_edgelist(
-    bipartite_df, 'user', 'page', create_using=nx.DiGraph())
+    bipartite_df, 'Source', 'Target', create_using=nx.DiGraph())
 
-<span class="comment"># 3. Build undirected user-to-user graph</span>
-<span class="comment">#    If directed, keep only mutual follows:</span>
+<span class="comment"># 3. Build user-to-user graph</span>
+<span class="comment"># Only MUTUAL (bidirectional) connections are kept.</span>
+<span class="comment"># If A follows B but B does not follow A, that edge is removed.</span>
 usr_graph = nx.from_pandas_edgelist(
-    user_net_df, 'user_a', 'user_b', create_using=nx.DiGraph())
+    user_net_df, 'Source', 'Target', create_using=nx.DiGraph())
 to_remove = [(u, v) for u, v in usr_graph.edges()
              if not usr_graph.has_edge(v, u)]
 usr_graph.remove_edges_from(to_remove)
 usr_graph = usr_graph.to_undirected()
 
-<span class="comment"># 4. Extract adjacency matrices</span>
-users = sorted(set(bipartite_df['user']))
-pages = sorted(set(bipartite_df['page']))
+<span class="comment"># 4. Identify users and pages, extract adjacency matrices</span>
+pages = sorted(set(bipartite_df['Target']))
+users = sorted(set(bipartite_df['Source']) - set(pages))
 bip_adj = nx.bipartite.biadjacency_matrix(bip_graph, users, pages)
 usr_adj = nx.adjacency_matrix(usr_graph, users)
 
-<span class="comment"># 5. Fit HUE — cores are the pages, automatically</span>
-model = HUE(random_state=42)
+<span class="comment"># 5. Fit HUE (progress is printed automatically)</span>
+model = HUE(
+    n_clustering_iterations=50,   <span class="comment"># runs of community detection</span>
+    partition_method='surprise',   <span class="comment"># or 'modularity'</span>
+    n_jobs=2,                      <span class="comment"># parallel workers for similarity</span>
+    chunksize=3,                   <span class="comment"># multiprocessing chunk size</span>
+    normalize=True,                <span class="comment"># rows sum to 1</span>
+    random_state=42
+)
 embedding = model.fit_from_networks(
     bip_adj, usr_adj,
-    user_ids=users, core_ids=pages
+    user_ids=np.array(users), core_ids=np.array(pages)
 )
+<span class="output"># [Step 1/5] Validating inputs...
+# [Step 2/5] Filtering empty rows/columns...
+#   Bipartite: 32000 users x 9847 cores
+# [Step 3/5] Computing pairwise similarity for 9847 cores...
+#   Computing ego alter-network edge counts...
+#   Computing edge similarity matrix...
+# [Step 4/5] Clustering cores (surprise, 50 iterations)...
+#   Found 128 communities
+# [Step 5/5] Computing embeddings...
+# Done.</span>
 
-<span class="comment"># Each column = a cluster of structurally similar pages</span>
-print(embedding.head())
-print(f"Discovered {model.n_clusters_} preference communities")
+<span class="comment"># 6. Save Output 1: which cluster each page belongs to</span>
+cluster_labels = model.get_cluster_labels()
+page_clusters = pd.DataFrame([
+    {'page': page, 'cluster': label}
+    for page, label in cluster_labels.items()
+]).sort_values('cluster')
+page_clusters.to_csv('page_clusters.csv', index=False)
 
-<span class="comment"># Inspect which pages ended up in each cluster</span>
-for label, members in model.clusters_.items():
-    print(f"  Cluster {label}: {list(members)[:5]}...")
+<span class="comment"># 7. Save Output 2: user embedding vectors</span>
+embedding.to_csv('user_embeddings.csv', index=True)
 </pre></div>
 
         <div class="callout tip">
             <p class="callout-title">
                 <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                Choosing Cores
+                Choosing Cores &amp; Parameters
             </p>
-            <p>In real social networks, <strong>social pages</strong> (high-follower public accounts) are the natural cores — they represent clear topics and preferences. Sort pages by follower count and select the top N as your core vertices. When using <code>fit_from_networks</code>, the columns of your bipartite matrix <em>are</em> the cores. For single-graph mode, use <code>core_selection='degree'</code> to automatically pick the highest-degree nodes, or <code>'predefined'</code> with a curated list.</p>
+            <p>In real social networks, <strong>social pages</strong> (high-follower public accounts) are the natural cores — they represent clear topics and preferences. Sort pages by follower count and select the top N as your core vertices. When using <code>fit_from_networks</code>, the columns of your bipartite matrix <em>are</em> the cores.</p>
+            <p style="margin-top: 0.5rem;">All parameters — <code>n_clustering_iterations</code>, <code>partition_method</code>, <code>n_jobs</code>, <code>chunksize</code>, <code>normalize</code> — are set on the <code>HUE()</code> constructor and apply to both <code>fit()</code> and <code>fit_from_networks()</code>. Only <code>n_cores</code> and <code>core_selection</code> are ignored by <code>fit_from_networks</code>.</p>
         </div>
 
         <h3 class="sub">Example 4 — Visualizing Core Nodes on the Graph</h3>
@@ -723,9 +750,11 @@ plt.show()</pre></div>
         <div class="callout warning">
             <p class="callout-title">
                 <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01"/></svg>
-                Directed Graphs
+                Directed vs. Undirected Edges
             </p>
-            <p>HUE expects an <strong>undirected</strong> graph. If your network is directed (e.g., Twitter follows), convert it first with <code>G = G.to_undirected()</code>. The paper uses the undirected follow-back structure.</p>
+            <p><strong>Bipartite network:</strong> All edges are kept — every user→page follow is used (directed).<br>
+            <strong>User-to-user network:</strong> Only <strong>mutual</strong> (bidirectional) connections are kept. If A follows B but B does not follow A, that edge is removed. This ensures only genuine friendships are used.<br>
+            <strong>Single-graph mode:</strong> HUE expects an undirected graph. Convert directed graphs with <code>G = G.to_undirected()</code>.</p>
         </div>
 
         <!-- ── API Reference ── -->
@@ -750,6 +779,7 @@ model = HUE(n_cores=0.15, core_selection='random',
                     <tr><td><code>partition_method</code></td><td>str</td><td><code>'surprise'</code></td><td><code>'surprise'</code> (SurpriseVertexPartition) or <code>'modularity'</code> (ModularityVertexPartition)</td></tr>
                     <tr><td><code>n_jobs</code></td><td>int</td><td><code>2</code></td><td>Parallel workers for similarity computation</td></tr>
                     <tr><td><code>normalize</code></td><td>bool</td><td><code>True</code></td><td>Normalize rows to sum to 1 (proportional membership)</td></tr>
+                    <tr><td><code>verbose</code></td><td>bool</td><td><code>True</code></td><td>Print progress messages during fitting</td></tr>
                     <tr><td><code>random_state</code></td><td>int / None</td><td><code>None</code></td><td>Seed for reproducibility</td></tr>
                 </tbody>
             </table>
@@ -829,15 +859,36 @@ model = HUE(n_cores=0.15, core_selection='random',
 pip install -e ".[clustering]"
 
 <span class="comment"># ── Option A: Two separate networks (recommended for real data) ──</span>
+import numpy as np, pandas as pd, networkx as nx
 from hue_embedding import HUE
 
-<span class="comment"># bipartite_adj: sparse (n_users × n_pages) — who follows which page</span>
-<span class="comment"># user_adj:      sparse (n_users × n_users) — friendships among users</span>
-model = HUE(random_state=42)
-embedding = model.fit_from_networks(
-    bipartite_adj, user_adj,
-    user_ids=user_list, core_ids=page_list
+bipartite_df = pd.read_csv('bipartite.csv')       <span class="output"># [Source, Target]</span>
+user_net_df  = pd.read_csv('user_network.csv')     <span class="output"># [Source, Target]</span>
+
+bip_graph = nx.from_pandas_edgelist(bipartite_df, 'Source', 'Target', create_using=nx.DiGraph())
+usr_graph = nx.from_pandas_edgelist(user_net_df, 'Source', 'Target')
+
+pages = sorted(set(bipartite_df['Target']))
+users = sorted(set(bipartite_df['Source']) - set(pages))
+bip_adj = nx.bipartite.biadjacency_matrix(bip_graph, users, pages)
+usr_adj = nx.adjacency_matrix(usr_graph, users)
+
+model = HUE(
+    n_clustering_iterations=50,
+    partition_method='surprise',
+    n_jobs=2, chunksize=3,
+    normalize=True, random_state=42
 )
+embedding = model.fit_from_networks(
+    bip_adj, usr_adj,
+    user_ids=np.array(users), core_ids=np.array(pages)
+)
+
+<span class="comment"># Save outputs</span>
+pd.DataFrame([{'page': p, 'cluster': c}
+              for p, c in model.get_cluster_labels().items()
+             ]).to_csv('page_clusters.csv', index=False)
+embedding.to_csv('user_embeddings.csv', index=True)
 
 <span class="comment"># ── Option B: Single graph (synthetic data, exploration) ──</span>
 import networkx as nx

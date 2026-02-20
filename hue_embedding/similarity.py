@@ -83,7 +83,7 @@ def _ego_alter_edge_similarity(target_node_index, bipartite_adj, general_adj):
     return csr_matrix(ego_net_edge_similarity)
 
 
-def find_similarity_matrix(bipartite_adj, general_adj, n_jobs=2, chunksize=3):
+def find_similarity_matrix(bipartite_adj, general_adj, n_jobs=2, chunksize=3, verbose=False):
     """Compute the ego's alter-network structural similarity matrix for all core vertices.
 
     This is the main similarity computation in HUE. For each pair of core vertices,
@@ -110,6 +110,8 @@ def find_similarity_matrix(bipartite_adj, general_adj, n_jobs=2, chunksize=3):
         Number of parallel processes for computation.
     chunksize : int, default=3
         Chunk size for multiprocessing pool.
+    verbose : bool, default=False
+        If True, print progress messages.
 
     Returns
     -------
@@ -129,6 +131,8 @@ def find_similarity_matrix(bipartite_adj, general_adj, n_jobs=2, chunksize=3):
     target_neighbors_node_count = np.array(bipartite_adj.sum(axis=0)).reshape(-1)
 
     # Count edges in each core's ego alter network (parallelized)
+    if verbose:
+        print(f"  Computing ego alter-network edge counts ({num_cores} cores, {n_jobs} workers)...")
     with Pool(processes=n_jobs) as pool:
         pool_fn = partial(
             _num_edges_in_ego_alter_network,
@@ -140,9 +144,13 @@ def find_similarity_matrix(bipartite_adj, general_adj, n_jobs=2, chunksize=3):
         )
 
     # Node similarity: number of common neighbors between core pairs
+    if verbose:
+        print(f"  Computing node similarity matrix...")
     node_sim_mat = bipartite_adj.T.dot(bipartite_adj).tocsr()
 
     # Edge similarity: number of shared edges between ego alter networks
+    if verbose:
+        print(f"  Computing edge similarity matrix ({num_cores} cores, {n_jobs} workers)...")
     edge_sim_mat = csr_matrix((num_cores, num_cores), dtype=int).tolil()
 
     with Pool(processes=n_jobs) as pool:
@@ -159,6 +167,8 @@ def find_similarity_matrix(bipartite_adj, general_adj, n_jobs=2, chunksize=3):
     del results
 
     # Combined similarity: nodes + edges
+    if verbose:
+        print(f"  Computing final similarity scores...")
     combined_sim_mat = node_sim_mat + edge_sim_mat
     sum_node_edge = (target_neighbors_node_count + target_neighbors_edge_count).reshape(-1, 1)
 
