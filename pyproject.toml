@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 authors = [
-    {name = "Mahyar Sharif Vaghefi", email = "mahyar.sharifvaghefi@uta.edu"},
+    {name = "Mahyar S. Vaghefi", email = "mahyar.sharifvaghefi@uta.edu"},
     {name = "Derek L. Nazareth", email = "derek@uwm.edu"},
 ]
 keywords = [
@@ -51,10 +51,10 @@ all = ["leidenalg>=0.9", "python-igraph>=0.10", "matplotlib>=3.4", "fa2>=0.3"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "black", "ruff"]
 
 [project.urls]
-Homepage = "https://mahyarsv.github.io/HUE/"
-Documentation = "https://mahyarsv.github.io/HUE/"
-Repository = "https://github.com/mahyarsv/HUE"
-"Bug Tracker" = "https://github.com/mahyarsv/HUE/issues"
+Homepage = "https://mahyarsv.github.io/projects/hue/"
+Documentation = "https://mahyarsv.github.io/projects/hue/"
+Repository = "https://github.com/mahyarvaghefi/HUE"
+"Bug Tracker" = "https://github.com/mahyarvaghefi/HUE/issues"
 "Published Paper" = "https://doi.org/10.17705/1jais.00711"
 
 [tool.setuptools.packages.find]
